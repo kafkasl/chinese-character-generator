@@ -1,55 +1,65 @@
-from PIL import Image, ImageDraw, ImageFont
 import pandas as pd
-import textwrap
 import os
+from PIL import Image, ImageDraw, ImageFont
+from io import BytesIO
+import requests
+from bs4 import BeautifulSoup
 
-# Set up the font
-font_path = 'NotoSansTC-Regular.otf'
-base_font_size = 36
-# Dimensions of the image
-img_width = 800
-img_height = 600
+def get_image_url(char):
+    base_url = f"https://commons.wikimedia.org/wiki/File:{char}-red.png"
+    response = requests.get(base_url)
+    soup = BeautifulSoup(response.text, 'html.parser')
+    # Find the link to the image
+    image_link = soup.find('a', {"class": "internal"})
+    if image_link:
+        return image_link['href']
+    else:
+        return None
 
-# Read the CSV file
+def get_zhuyin(char):
+    # Assuming you have the go-zhuyin tool installed and accessible in your PATH
+    zhuyin = os.popen(f"zhuyin {char}").read().strip()
+    return zhuyin
+
+def create_character_image(char):
+    img = Image.new('RGB', (300, 300), color='white')
+    draw = ImageDraw.Draw(img)
+    font = ImageFont.truetype('NotoSansTC-Regular.otf', 200)
+    w, h = draw.textsize(char, font=font)
+    draw.text(((300-w)/2, (300-h)/2), char, fill="black", font=font)
+    return img
+
 df = pd.read_csv('hanziDB.csv')
 
-# Create images directory if it doesn't exist
-os.makedirs('img', exist_ok=True)
+for idx, row in df.iterrows():
+    char = row['character']
+    pinyin = row['pinyin']
+    definition = row['definition']
 
-# Function to adjust font size based on text length
-def adjust_font_size(draw, text, font_path, base_font_size, max_width):
-    font_size = base_font_size
-    font = ImageFont.truetype(font_path, font_size)
+    img = create_character_image(char)
+    image_url = get_image_url(char)
+    stroke_order = None
+    if image_url:
+        response = requests.get(image_url)
+        stroke_order = Image.open(BytesIO(response.content))
+
+    # Create a new image with a larger size
+    new_img = Image.new('RGB', (800, 600), color='white')
+
+    # Paste the original image into the new image
+    new_img.paste(img, (50, 20))
+    new_img.paste(stroke_order, (350, 50))
+
+    W, H = new_img.size
+    draw = ImageDraw.Draw(new_img)
+    font = ImageFont.truetype('NotoSansTC-Regular.otf', 50)
+
+    zhuyin = get_zhuyin(char)
+
+    text = f"{pinyin}\n{zhuyin}\n{definition}"
     w, h = draw.textsize(text, font=font)
-    while w > max_width:
-        font_size -= 1
-        font = ImageFont.truetype(font_path, font_size)
-        w, h = draw.textsize(text, font=font)
-    return font
+    draw.text(((W-w)/2, 350), text, fill="black", font=font)
 
-for index, row in df.iterrows():
-    character = row['character']
-    pronunciation = row['pinyin']
-    definition = textwrap.fill(row['definition'], width=30)  # wrap the text to fit into image
+    new_img.save(f"img/{char}.png")
 
-    # Create a new image
-    img = Image.new('RGB', (img_width, img_height), color='white')
-    d = ImageDraw.Draw(img)
-
-    # Add the text to the image
-    char_font = ImageFont.truetype(font_path, base_font_size)
-    d.text((10, 10), character, font=char_font, fill='black')
-    _, char_height = d.textsize(character, font=char_font)
-
-    def_font = adjust_font_size(d, definition, font_path, base_font_size, img.width - 20)
-    d.text((10, char_height + 20), definition, font=def_font, fill='black')
-    _, def_height = d.textsize(definition, font=def_font)
-
-    pron_font = ImageFont.truetype(font_path, base_font_size)
-    d.text((10, char_height + def_height + 30), pronunciation, font=pron_font, fill='black')
-
-    # Save the image
-    img.save(f'img/{pronunciation}.png')
-
-    # Stop after generating one image
-    break
+    break  # Remove this line to generate images for all characters
