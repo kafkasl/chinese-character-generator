@@ -6,6 +6,7 @@ import requests
 from bs4 import BeautifulSoup
 import hanzidentifier
 import urllib.request
+import time
 
 W = 1280
 
@@ -32,7 +33,19 @@ def create_character_image(char):
     return img
 
 def download_image(url, filename):
-    urllib.request.urlretrieve(url, filename)
+    headers = {'User-Agent': 'YourAppName/1.0'} # Replace with appropriate value
+    req = urllib.request.Request(url, headers=headers)
+    try:
+        with urllib.request.urlopen(req) as response:
+            with open(filename, 'wb') as file:
+                file.write(response.read())
+    except urllib.error.HTTPError as e:
+        if e.code == 429:
+            retry_after = int(e.headers.get('Retry-After', 0))
+            print(f"Received 429, sleeping for {retry_after} seconds.")
+            time.sleep(retry_after)
+            # Optionally, you could call download_image again to retry after waiting
+
 
 def add_white_background(image):
     background = Image.new('RGB', image.size, (255, 255, 255))
@@ -91,6 +104,8 @@ def add_stroke_order_character(new_img: Image, char: str, x: int, y: int):
         stroke_order = Image.open('stroke_order.png')
         stroke_order = add_white_background(stroke_order)
         new_img.paste(stroke_order, (x, y))
+        return True
+    return False
 
 def add_zhuyin(draw: ImageDraw.Draw, char: str, x: int, y: int):
     """
@@ -163,6 +178,8 @@ if __name__ == '__main__':
                         help='CSV file to read the Hanzi data from.')
     parser.add_argument('--hsk-level', type=int,
                         help='HSK level for which characters should be generated. By default, generate for all levels.')
+    parser.add_argument('--skip-missing', type=bool, default=True,
+                        help='Skip characters missing the stroke order.')
 
     # Parse the arguments
     args = parser.parse_args()
@@ -186,7 +203,9 @@ if __name__ == '__main__':
         font = ImageFont.truetype(args.font, 50)
 
         add_normal_character(draw, char, left_margin + 25, 20)
-        add_stroke_order_character(new_img, char, left_margin + 425, 50)
+        added = add_stroke_order_character(new_img, char, left_margin + 425, 50)
+        if not added and args.skip_missing:
+            continue
 
         if args.output_zhuyin:
             add_zhuyin(draw, char, left_margin + 315, 125)
@@ -195,7 +214,7 @@ if __name__ == '__main__':
         add_definition(draw, definition, W - left_margin)
 
             # Create the output directory if it doesn't exist
-        output_dir = os.path.join(args.output_dir, str(row['hsk_level']))
+        output_dir = os.path.join(args.output_dir, str(int(row['hsk_level'])))
         if not os.path.exists(output_dir):
             os.makedirs(output_dir)
 
